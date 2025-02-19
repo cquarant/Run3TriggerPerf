@@ -119,15 +119,15 @@ using namespace std;
 
 #ifndef CMSSW12plus
 // Run 1 and 2
-class NanoAnalyzerDoubleEleDebug : public edm::EDAnalyzer
+class NanoAnalyzerDoubleEle : public edm::EDAnalyzer
 #else
 // Run 3
-class NanoAnalyzerDoubleEleDebug : public edm::one::EDAnalyzer<>
+class NanoAnalyzerDoubleEle : public edm::one::EDAnalyzer<>
 #endif
 {
 public:
-  explicit NanoAnalyzerDoubleEleDebug(const edm::ParameterSet&);
-  ~NanoAnalyzerDoubleEleDebug();
+  explicit NanoAnalyzerDoubleEle(const edm::ParameterSet&);
+  ~NanoAnalyzerDoubleEle();
 
   static void fillDescriptions(edm::ConfigurationDescriptions & descriptions);
 
@@ -154,7 +154,6 @@ private:
   Handle< reco::VertexCollection > vertices_;
   Handle< edm::TriggerResults> HLTtriggers_;
   Handle<pat::TriggerObjectStandAloneCollection> triggerObjects;
-  Handle<edm::TriggerResults> L1triggerResults;
 
 
 
@@ -259,7 +258,7 @@ private:
 }; // end of class member
 
 
-NanoAnalyzerDoubleEleDebug::NanoAnalyzerDoubleEleDebug(const edm::ParameterSet& iConfig): 
+NanoAnalyzerDoubleEle::NanoAnalyzerDoubleEle(const edm::ParameterSet& iConfig): 
   bFieldToken_(esConsumes<MagneticField, IdealMagneticFieldRecord>())
 {
   electronToken_           = consumes<pat::ElectronCollection>(iConfig.getParameter<edm::InputTag>("electrons"));
@@ -279,9 +278,9 @@ NanoAnalyzerDoubleEleDebug::NanoAnalyzerDoubleEleDebug(const edm::ParameterSet& 
 } // end of constructor
 
 
-NanoAnalyzerDoubleEleDebug::~NanoAnalyzerDoubleEleDebug() { }
+NanoAnalyzerDoubleEle::~NanoAnalyzerDoubleEle() { }
 
-void NanoAnalyzerDoubleEleDebug::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
+void NanoAnalyzerDoubleEle::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
 
   reset();
 
@@ -290,8 +289,6 @@ void NanoAnalyzerDoubleEleDebug::analyze(const edm::Event& iEvent, const edm::Ev
   iEvent.getByToken(verticeToken_, vertices_ );
   iEvent.getByToken(triggerToken_, HLTtriggers_);
   iEvent.getByToken(triggerobjectToken_ , triggerObjects); 
-
-iEvent.getByToken(triggerResultsToken_, triggerResults);
 
   nvtx = vertices_->size();
 
@@ -654,35 +651,50 @@ iEvent.getByToken(triggerResultsToken_, triggerResults);
   float bestMatchE2_phi = -99.;
   float bestMatchE2_pt  = -99.;
   float bestMatchE2_dR  = 999.;
+
+  // Get the L1 EGamma collection from the event
   const auto &l1EG = iEvent.get(l1EG_); 
-  for (l1t::EGammaBxCollection::const_iterator it = l1EG.begin(0); it != l1EG.end(0); it++) {
-    pat::TriggerObjectStandAlone l1obj(it->p4());
+
+  // Loop over L1 EGamma objects
+  for (l1t::EGammaBxCollection::const_iterator L1ele = l1EG.begin(0); L1ele != l1EG.end(0); L1ele++) {
+    pat::TriggerObjectStandAlone l1obj(L1ele->p4());
     
+    // Create TVector3 for L1 object
     TVector3 l1objTV3;
-    l1objTV3.SetPtEtaPhi( it->pt(), it->eta(), it->phi() );
+    l1objTV3.SetPtEtaPhi(L1ele->pt(), L1ele->eta(), L1ele->phi());
+
+    // Calculate deltaEta, deltaPhi, and deltaR for electron 1
     Float_t deltaEta1 = fabs(ele1TV3.Eta() - l1objTV3.Eta());
     Float_t deltaPhi1 = fabs(ele1TV3.DeltaPhi(l1objTV3));
     Float_t deltaRE1  = fabs(ele1TV3.DeltaR(l1objTV3));
+
+    // Calculate deltaEta, deltaPhi, and deltaR for electron 2
     Float_t deltaEta2 = fabs(ele2TV3.Eta() - l1objTV3.Eta());
     Float_t deltaPhi2 = fabs(ele2TV3.DeltaPhi(l1objTV3));
     Float_t deltaRE2  = fabs(ele2TV3.DeltaR(l1objTV3));
-    
-    if (deltaEta1<0.07 && deltaPhi1<0.2 && deltaRE1<bestMatchE1_dR && it->pt()>bestMatchE1_pt){
-      if (bestMatchE1_pt>0 && deltaEta2<0.07 && deltaPhi2<0.2){
-        bestMatchE2_eta  = it->eta(); 
-        bestMatchE2_phi  = it->phi(); 
-        bestMatchE2_pt   = it->pt(); 
-        bestMatchE2_dR   = deltaRE2;          
+
+    // Check if L1 object matches electron 1 and has higher pt than the current best match
+    if (deltaEta1 < 0.07 && deltaPhi1 < 0.2 && L1ele->pt() > bestMatchE1_pt) {
+      // If there is already a previous match for electron 1, (let's call it L1eleOld), 
+      // before substituting L1eleOld with L1ele, check if L1eleOld can be a better match for electron 2
+      if (bestMatchE1_pt > 0 && deltaEta2 < 0.07 && deltaPhi2 < 0.2 && L1ele->pt() > bestMatchE2_pt) {
+        bestMatchE2_eta  = bestMatchE1_eta; 
+        bestMatchE2_phi  = bestMatchE1_phi; 
+        bestMatchE2_pt   = bestMatchE1_pt; 
+        bestMatchE2_dR   = bestMatchE1_dR;          
       }
-      bestMatchE1_eta  = it->eta(); 
-      bestMatchE1_phi  = it->phi(); 
-      bestMatchE1_pt   = it->pt();    
+      // Update best match for electron 1
+      bestMatchE1_eta  = L1ele->eta(); 
+      bestMatchE1_phi  = L1ele->phi(); 
+      bestMatchE1_pt   = L1ele->pt();    
       bestMatchE1_dR   = deltaRE1;
     }
-    else if (deltaEta2<0.07 && deltaPhi2<0.2 && deltaRE2<bestMatchE2_dR && it->pt()>bestMatchE2_pt){
-      bestMatchE2_eta  = it->eta(); 
-      bestMatchE2_phi  = it->phi(); 
-      bestMatchE2_pt   = it->pt(); 
+    // Check if L1 object matches electron 2 and has higher pt than the current best match
+    else if (deltaEta2 < 0.07 && deltaPhi2 < 0.2 && L1ele->pt() > bestMatchE2_pt) {
+      // Update best match for electron 2
+      bestMatchE2_eta  = L1ele->eta(); 
+      bestMatchE2_phi  = L1ele->phi(); 
+      bestMatchE2_pt   = L1ele->pt(); 
       bestMatchE2_dR   = deltaRE2;
     }
   }
@@ -756,20 +768,20 @@ iEvent.getByToken(triggerResultsToken_, triggerResults);
 //************* additional methods *****************
 //**************************************************
 
-void NanoAnalyzerDoubleEleDebug::beginJob(const edm::ParameterSet& iConfig) { }
+void NanoAnalyzerDoubleEle::beginJob(const edm::ParameterSet& iConfig) { }
 
-void NanoAnalyzerDoubleEleDebug::beginRun(const edm::Run &iRun, const edm::EventSetup &iStp) { }
+void NanoAnalyzerDoubleEle::beginRun(const edm::Run &iRun, const edm::EventSetup &iStp) { }
 
-void NanoAnalyzerDoubleEleDebug::fillDescriptions(edm::ConfigurationDescriptions & descriptions) { }
+void NanoAnalyzerDoubleEle::fillDescriptions(edm::ConfigurationDescriptions & descriptions) { }
 
-void NanoAnalyzerDoubleEleDebug::endRun(edm::Run const&, edm::EventSetup const&) { }
+void NanoAnalyzerDoubleEle::endRun(edm::Run const&, edm::EventSetup const&) { }
 
-void NanoAnalyzerDoubleEleDebug::endJob() { }
+void NanoAnalyzerDoubleEle::endJob() { }
 
 //define this as a plug-in
 
 // branch title creation
-void NanoAnalyzerDoubleEleDebug::createBranch() { 
+void NanoAnalyzerDoubleEle::createBranch() { 
 
   tree_->Branch("run", &run, "run/i");
   tree_->Branch("event", &event, "event/l");
@@ -930,7 +942,7 @@ void NanoAnalyzerDoubleEleDebug::createBranch() {
   tree_->Branch("Jpsi_electronsDr",     &Jpsi_electronsDr );
 }
 
-void NanoAnalyzerDoubleEleDebug::reset(void){
+void NanoAnalyzerDoubleEle::reset(void){
 
   run = -1;
   event = -1;
@@ -1004,4 +1016,4 @@ void NanoAnalyzerDoubleEleDebug::reset(void){
 
 }
 
-DEFINE_FWK_MODULE(NanoAnalyzerDoubleEleDebug);
+DEFINE_FWK_MODULE(NanoAnalyzerDoubleEle);
